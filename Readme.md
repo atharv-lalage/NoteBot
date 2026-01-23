@@ -18,12 +18,14 @@ You enter your notes into the text area, and when you click the "Convert" button
 1.  **Clone the repository or download the code.**
 
 2.  **Create and activate a virtual environment:**
+
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     ```
 
 3.  **Install the required packages:**
+
     ```bash
     pip install -r requirements.txt
     ```
@@ -32,11 +34,13 @@ You enter your notes into the text area, and when you click the "Convert" button
     You need to set your Gemini API key as an environment variable named `GEMINI_API_KEY`.
 
     On Windows:
+
     ```bash
     set GEMINI_API_KEY="YOUR_API_KEY"
     ```
 
     On macOS/Linux:
+
     ```bash
     export GEMINI_API_KEY="YOUR_API_KEY"
     ```
@@ -46,7 +50,7 @@ You enter your notes into the text area, and when you click the "Convert" button
 Once you have installed the dependencies and set up your API key, you can run the Streamlit app with the following command:
 
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
 The application will open in your web browser.
