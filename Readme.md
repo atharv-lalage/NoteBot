@@ -61,3 +61,7 @@ The application will open in your web browser.
 2.  Enter your notes in the text area provided.
 3.  Click the "Convert" button.
 4.  The converted notes will be displayed below the button.
+
+## License
+
+This project is for academic/demo purposes.
