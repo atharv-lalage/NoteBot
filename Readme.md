@@ -1,67 +1,95 @@
-# Note Bot
+# 📒 NoteBot — AI-Powered RAG Study Assistant
 
-Note Bot is a web application built with Streamlit that uses the Google Gemini Pro model to convert your notes into a more organized format.
+An intelligent study assistant that lets you **chat with your PDF notes** using a Retrieval-Augmented Generation (RAG) pipeline powered by **Google Gemini 2.5 Flash**.
 
-## How it works
+Upload any PDF → NoteBot chunks it, embeds it, and lets you ask questions, generate summaries, and create flashcards — all grounded in your actual notes.
 
-You enter your notes into the text area, and when you click the "Convert" button, the app sends your notes to the Gemini Pro model. The model then processes the notes and returns a converted, more structured version.
+---
 
-## Getting Started
+## ✨ GenAI Features Demonstrated
 
-### Prerequisites
+| Feature | Implementation | Why It Matters |
+|---------|---------------|----------------|
+| **RAG Pipeline** | Chunking → Embedding → Cosine Retrieval → Generation | Core pattern behind ChatGPT plugins, Perplexity, etc. |
+| **Streaming Responses** | `generate_content_stream` — token-by-token output | Real-time UX, industry standard for LLM apps |
+| **Structured Output** | `response_mime_type="application/json"` | Reliable, parseable AI responses (no regex hacks) |
+| **Multi-Turn Chat** | `st.session_state` conversation history | Context-aware follow-up questions |
+| **Batch Embeddings** | Single API call per 100 chunks | 10x fewer API calls vs one-at-a-time |
+| **Source Attribution** | Retrieved chunks + similarity scores shown | Transparency & trust in AI answers |
+| **Retry with Backoff** | Auto-retry on 429/503 with exponential delay | Production-grade error resilience |
+| **Prompt Engineering** | System instructions + context injection | Grounded, hallucination-resistant answers |
 
-- Python 3.6 or higher
-- A Google Gemini API key. You can obtain one from [Google AI Studio](https://aistudio.google.com/).
+---
 
-### Installation
+## 🧩 App Tabs
 
-1.  **Clone the repository or download the code.**
+### 💬 Chat — RAG Q&A with Streaming
+Ask questions about your notes. Answers are streamed token-by-token and grounded in retrieved chunks with similarity scores.
 
-2.  **Create and activate a virtual environment:**
+### 📊 Summary — Structured Document Analysis
+One-click AI summary returning structured JSON with: title, summary, key topics, difficulty level, and study tips.
 
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
+### 📇 Flashcards — AI-Generated Study Cards
+Auto-generate Q&A flashcards with difficulty tagging (easy/medium/hard) from your notes.
 
-3.  **Install the required packages:**
+---
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+## 🛠️ Tech Stack
 
-4.  **Set up your environment variables:**
-    You need to set your Gemini API key as an environment variable named `GEMINI_API_KEY`.
+| Component | Technology |
+|-----------|-----------|
+| **LLM** | Google Gemini 2.5 Flash |
+| **Embeddings** | Gemini Embedding 001 |
+| **Frontend** | Streamlit |
+| **Retrieval** | Cosine similarity (NumPy) |
+| **Text Splitting** | LangChain `RecursiveCharacterTextSplitter` |
+| **PDF Parsing** | PyPDF2 |
 
-    On Windows:
+---
 
-    ```bash
-    set GEMINI_API_KEY="YOUR_API_KEY"
-    ```
-
-    On macOS/Linux:
-
-    ```bash
-    export GEMINI_API_KEY="YOUR_API_KEY"
-    ```
-
-### Running the Application
-
-Once you have installed the dependencies and set up your API key, you can run the Streamlit app with the following command:
+## 🚀 Setup & Run
 
 ```bash
-python -m streamlit run app.py
+# 1. Clone
+git clone https://github.com/your-username/note-bot.git
+cd note-bot
+
+# 2. Virtual environment
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # macOS/Linux
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure API key
+cp .env.example .env
+# Edit .env → add your Gemini API key from https://aistudio.google.com/
+
+# 5. Run
+streamlit run app.py
 ```
 
-The application will open in your web browser.
+---
 
-## Usage
+## 📁 Project Structure
 
-1.  Open the web application in your browser.
-2.  Enter your notes in the text area provided.
-3.  Click the "Convert" button.
-4.  The converted notes will be displayed below the button.
+```
+NoteBot/
+├── app.py              # Main application (282 lines)
+│                        # - RAG pipeline (embed → retrieve → generate)
+│                        # - Streaming chat with memory
+│                        # - Structured output for summary & flashcards
+│                        # - Retry logic for API resilience
+├── requirements.txt    # Clean dependencies (6 packages)
+├── .env                # Your API key (git-ignored)
+├── .env.example        # API key template
+├── .gitignore          # Ignores .env, venv/, __pycache__/
+└── README.md           # This file
+```
 
-## License
+---
 
-This project is for academic/demo purposes.
+## 📄 License
+
+Academic / Demo purposes.

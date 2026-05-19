@@ -1,120 +1,282 @@
 import os
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-
-import streamlit as st
-from PyPDF2 import PdfReader
+import json
 import time
 import numpy as np
+import streamlit as st
+from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError, ServerError
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.embeddings import Embeddings
 
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-st.header("NoteBot (Gemini Lite)")
+# ─────────────────────────── Config ───────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CHAT_MODEL = "gemini-2.5-flash"            # Latest stable model (May 2026)
+EMBED_MODEL = "gemini-embedding-001"      # Gemini native embeddings
+MAX_RETRIES = 3
+
+st.set_page_config(page_title="NoteBot", page_icon="📒", layout="wide")
+st.title("📒 NoteBot")
+st.caption("RAG-powered study assistant · Gemini 2.5 Flash · Streaming · Structured Output")
 
 if not GEMINI_API_KEY:
-    st.error("⚠️ API Key not found!")
+    st.error("⚠️ Set `GEMINI_API_KEY` in your `.env` file")
     st.stop()
 
-# Initialize client GLOBALLY at top level
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# --- Embedding function ---
-def get_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
-    result = client.models.embed_content(
-        model="gemini-embedding-001",
-        contents=text,
-        config=types.EmbedContentConfig(task_type=task_type)
+# ─────────────────────── Session State ────────────────────────
+for key, default in {
+    "messages": [],
+    "chunks": [],
+    "embeddings": None,
+    "ready": False,
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# ─────────────────── Safe API Call Helper ─────────────────────
+
+def safe_api_call(fn, *args, **kwargs):
+    """Retry API calls on 429/503 errors with backoff."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return fn(*args, **kwargs)
+        except (ClientError, ServerError) as e:
+            if attempt < MAX_RETRIES - 1:
+                wait = (attempt + 1) * 3
+                st.warning(f"⏳ API busy, retrying in {wait}s... (attempt {attempt+1}/{MAX_RETRIES})")
+                time.sleep(wait)
+            else:
+                raise e
+
+# ─────────────────────── Embedding Utils ──────────────────────
+
+def embed_texts(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> np.ndarray:
+    """Batch embed using Gemini Embedding API (batches of 100)."""
+    all_embs = []
+    for i in range(0, len(texts), 100):
+        batch = texts[i : i + 100]
+        result = safe_api_call(
+            client.models.embed_content,
+            model=EMBED_MODEL,
+            contents=batch,
+            config=types.EmbedContentConfig(task_type=task),
+        )
+        all_embs.extend([e.values for e in result.embeddings])
+    return np.array(all_embs)
+
+
+def retrieve(query: str, k: int = 4) -> tuple[list[str], list[float]]:
+    """Top-k retrieval via cosine similarity."""
+    q_emb = embed_texts([query], task="RETRIEVAL_QUERY")[0]
+    embs = st.session_state.embeddings
+    norms = np.linalg.norm(embs, axis=1) * np.linalg.norm(q_emb)
+    scores = embs @ q_emb / np.where(norms == 0, 1, norms)
+    top = np.argsort(scores)[::-1][:k]
+    return [st.session_state.chunks[i] for i in top], [float(scores[i]) for i in top]
+
+# ─────────────────────── PDF Processing ───────────────────────
+
+def process_pdf(file) -> list[str]:
+    reader = PdfReader(file)
+    text = "".join(p.extract_text() or "" for p in reader.pages)
+    if not text.strip():
+        raise ValueError("No text could be extracted from this PDF")
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800, chunk_overlap=200,
+        separators=["\n\n", "\n", ". ", " ", ""],
     )
-    return result.embeddings[0].values
+    return splitter.split_text(text)
 
-# --- Simple Vector Store ---
-class SimpleVectorStore:
-    def __init__(self):
-        self.texts = []
-        self.embeddings = []
-
-    def add_texts(self, texts: list[str]):
-        for text in texts:
-            emb = get_embedding(text, task_type="RETRIEVAL_DOCUMENT")
-            self.texts.append(text)
-            self.embeddings.append(emb)
-
-    def similarity_search(self, query: str, k: int = 4) -> list[str]:
-        query_emb = np.array(get_embedding(query, task_type="RETRIEVAL_QUERY"))
-        scores = []
-        for emb in self.embeddings:
-            emb_arr = np.array(emb)
-            score = np.dot(query_emb, emb_arr) / (
-                np.linalg.norm(query_emb) * np.linalg.norm(emb_arr)
-            )
-            scores.append(score)
-        top_k = np.argsort(scores)[::-1][:k]
-        return [self.texts[i] for i in top_k]
-
+# ─────────────────────────── Sidebar ──────────────────────────
 with st.sidebar:
-    st.title("My Notes")
-    file = st.file_uploader("Upload notes PDF", type="pdf")
+    st.header("📂 Upload Notes")
+    file = st.file_uploader("Choose a PDF", type="pdf")
 
-if file is not None:
-    with st.spinner("Processing PDF..."):
-        try:
-            my_pdf = PdfReader(file)
-            text = ""
-            for page in my_pdf.pages:
-                extracted = page.extract_text()
-                if extracted:
-                    text += extracted
+    if file and not st.session_state.ready:
+        with st.spinner("Extracting & embedding..."):
+            try:
+                chunks = process_pdf(file)
+                embeddings = embed_texts(chunks)
+                st.session_state.chunks = chunks
+                st.session_state.embeddings = embeddings
+                st.session_state.ready = True
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-            if not text:
-                st.error("Could not extract text.")
-                st.stop()
+    if st.session_state.ready:
+        st.success(f"✅ {len(st.session_state.chunks)} chunks indexed")
+        if st.button("🗑️ Reset"):
+            st.session_state.clear()
+            st.rerun()
 
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            chunks = splitter.split_text(text)
-            st.write(f"✅ Extracted {len(text)} characters, {len(chunks)} chunks.")
+# ─────────────────────────── Tabs ─────────────────────────────
+tab_chat, tab_summary, tab_flash = st.tabs(["💬 Chat", "📊 Summary", "📇 Flashcards"])
 
-            vector_store = SimpleVectorStore()
-            progress_bar = st.progress(0)
+# ═══════════════════ TAB 1: RAG Chat + Streaming ══════════════
+with tab_chat:
+    if not st.session_state.ready:
+        st.info("👈 Upload a PDF to start chatting with your notes")
+    else:
+        # Render history
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg.get("sources"):
+                    with st.expander("📄 Sources"):
+                        for i, (s, sc) in enumerate(zip(msg["sources"], msg["scores"])):
+                            st.caption(f"**[{sc:.2f}]** {s[:250]}...")
 
-            for i, chunk in enumerate(chunks):
-                vector_store.add_texts([chunk])
-                progress_bar.progress((i + 1) / len(chunks))
-                time.sleep(0.1)
+        # Chat input
+        if query := st.chat_input("Ask about your notes..."):
+            st.session_state.messages.append({"role": "user", "content": query})
+            with st.chat_message("user"):
+                st.markdown(query)
 
-            st.success("✅ Database Ready! Ask your question below.")
+            # Retrieve relevant chunks
+            sources, scores = retrieve(query, k=4)
+            context = "\n\n---\n\n".join(sources)
 
-        except Exception as e:
-            st.error(f"Error during processing: {e}")
-            st.stop()
+            # Build prompt with system instruction + conversation history
+            history = "\n".join(
+                f"{m['role'].upper()}: {m['content']}"
+                for m in st.session_state.messages[-6:]
+            )
 
-    user_query = st.text_input("Type your query here")
+            prompt = f"""You are NoteBot, an AI study assistant. Answer based ONLY on the provided context.
+If the answer isn't in the context, say "I couldn't find this in your notes."
+Be concise. Use bullet points for lists. Reference specific parts when possible.
 
-    if user_query:
-        try:
-            relevant_chunks = vector_store.similarity_search(user_query, k=4)
-            context_text = "\n\n".join(relevant_chunks)
+CONTEXT:
+{context}
 
-            prompt = f"""You are my assistant tutor. Answer the question based on the following context.
-If the answer is not in the context, simply say "I don't know Atharv".
+CONVERSATION HISTORY:
+{history}
 
-Context:
-{context_text}
+QUESTION: {query}"""
 
-Question:
-{user_query}
-"""
-            with st.spinner("Thinking..."):
-                response = client.models.generate_content(
-                    model="gemini-flash-latest",
-                    contents=prompt
-                )
-                st.write(response.text)  # <-- .text for clean output
+            # ✨ Streaming response (token-by-token)
+            with st.chat_message("assistant"):
+                try:
+                    placeholder = st.empty()
+                    full_response = ""
+                    for chunk in client.models.generate_content_stream(
+                        model=CHAT_MODEL, contents=prompt
+                    ):
+                        if chunk.text:
+                            full_response += chunk.text
+                            placeholder.markdown(full_response + "▌")
+                    placeholder.markdown(full_response)
 
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
+                    with st.expander("📄 Sources"):
+                        for i, (s, sc) in enumerate(zip(sources, scores)):
+                            st.caption(f"**[{sc:.2f}]** {s[:250]}...")
+
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": full_response,
+                        "sources": sources,
+                        "scores": scores,
+                    })
+                except (ClientError, ServerError) as e:
+                    st.error(f"⚠️ API error: {e}. Please wait a moment and try again.")
+
+# ═══════════════ TAB 2: Summary (Structured Output) ═══════════
+with tab_summary:
+    if not st.session_state.ready:
+        st.info("👈 Upload a PDF to generate a summary")
+    else:
+        if st.button("🧠 Generate Summary"):
+            with st.spinner("Analyzing..."):
+                sample = "\n\n".join(st.session_state.chunks[:20])
+                prompt = f"""Analyze these notes and return a JSON object:
+{{
+  "title": "detected title/subject",
+  "summary": "comprehensive 3-4 sentence summary",
+  "key_topics": ["topic1", "topic2"],
+  "difficulty": "Beginner | Intermediate | Advanced",
+  "study_tips": ["tip1", "tip2", "tip3"]
+}}
+
+NOTES:
+{sample}"""
+
+                # ✨ Structured Output — Gemini JSON mode
+                try:
+                    resp = safe_api_call(
+                        client.models.generate_content,
+                        model=CHAT_MODEL,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    data = json.loads(resp.text)
+                    st.subheader(data.get("title", "Summary"))
+                    st.write(data.get("summary", ""))
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**🏷️ Key Topics**")
+                        for t in data.get("key_topics", []):
+                            st.markdown(f"- {t}")
+                    with col2:
+                        st.markdown(f"**📈 Difficulty:** {data.get('difficulty', 'N/A')}")
+                        st.markdown("**💡 Study Tips**")
+                        for t in data.get("study_tips", []):
+                            st.markdown(f"- {t}")
+                except (ClientError, ServerError) as e:
+                    st.error(f"⚠️ API error: {e}. Please wait and try again.")
+                except json.JSONDecodeError:
+                    st.error("Failed to parse structured output")
+                    st.code(resp.text)
+
+# ═══════════════ TAB 3: Flashcards (Structured Output) ════════
+with tab_flash:
+    if not st.session_state.ready:
+        st.info("👈 Upload a PDF to generate flashcards")
+    else:
+        n = st.slider("Number of flashcards", 3, 15, 5)
+        if st.button("🎴 Generate Flashcards"):
+            with st.spinner("Creating flashcards..."):
+                sample = "\n\n".join(st.session_state.chunks[:15])
+                prompt = f"""Generate exactly {n} flashcards from these notes as JSON:
+{{
+  "flashcards": [
+    {{"question": "...", "answer": "...", "difficulty": "easy|medium|hard"}}
+  ]
+}}
+
+NOTES:
+{sample}"""
+
+                # ✨ Structured Output — Gemini JSON mode
+                try:
+                    resp = safe_api_call(
+                        client.models.generate_content,
+                        model=CHAT_MODEL,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    parsed = json.loads(resp.text)
+                    cards = parsed.get("flashcards", parsed) if isinstance(parsed, dict) else parsed
+                    for i, c in enumerate(cards):
+                        icon = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}.get(
+                            c.get("difficulty", ""), "⚪"
+                        )
+                        with st.expander(f"{icon} Card {i+1}: {c['question'][:60]}"):
+                            st.markdown(f"**Q:** {c['question']}")
+                            st.divider()
+                            st.markdown(f"**A:** {c['answer']}")
+                except (ClientError, ServerError) as e:
+                    st.error(f"⚠️ API error: {e}. Please wait and try again.")
+                except json.JSONDecodeError:
+                    st.error("Failed to parse structured output")
+                    st.code(resp.text)
