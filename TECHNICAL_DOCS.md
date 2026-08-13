@@ -7,7 +7,7 @@
 - [How RAG Works (Step by Step)](#how-rag-works-step-by-step)
 - [Code Walkthrough](#code-walkthrough)
 - [GenAI Concepts Used](#genai-concepts-used)
-- [Interview Q&A](#interview-qa)
+- [Technical FAQ & Design Decisions](#-technical-faq--design-decisions)
 
 ---
 
@@ -177,7 +177,7 @@ The `safe_api_call` function catches 429 (rate limit) and 503 (server busy) erro
 
 ---
 
-## Interview Q&A
+## ❓ Technical FAQ & Design Decisions
 
 ### Q1: What is RAG and why did you use it?
 **Answer:** RAG stands for Retrieval-Augmented Generation. Instead of asking an LLM to answer from its training data (which may be outdated or hallucinate), I retrieve relevant chunks from the user's uploaded PDF and inject them into the prompt as context. This grounds the response in actual data. I used it because NoteBot needs to answer questions about *specific* user-uploaded notes, not general knowledge.

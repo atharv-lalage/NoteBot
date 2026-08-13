@@ -4,6 +4,8 @@ An intelligent study assistant that lets you **chat with your PDF notes** using 
 
 Upload any PDF → NoteBot chunks it, embeds it, and lets you ask questions, generate summaries, and create flashcards — all grounded in your actual notes.
 
+👉 **[Read the Technical Documentation & FAQ](TECHNICAL_DOCS.md)** for architecture diagrams, RAG step-by-step pipeline specs, and technical design choices.
+
 ---
 
 ## ✨ GenAI Features Demonstrated
@@ -81,11 +83,12 @@ NoteBot/
 │                        # - Streaming chat with memory
 │                        # - Structured output for summary & flashcards
 │                        # - Retry logic for API resilience
+├── TECHNICAL_DOCS.md   # Architecture, RAG step-by-step & Technical FAQ
 ├── requirements.txt    # Clean dependencies (6 packages)
 ├── .env                # Your API key (git-ignored)
 ├── .env.example        # API key template
 ├── .gitignore          # Ignores .env, venv/, __pycache__/
-└── README.md           # This file
+└── README.md           # Main project overview
 ```
 
 ---
