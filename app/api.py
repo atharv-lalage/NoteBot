@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterator
 from typing import Any, Optional
 
+import fitz
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -311,13 +312,21 @@ def get_document_file(version_id: str) -> Response:
         record = DocumentRepository(session).get_version(version_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Document version was not found.")
-        if not record.pdf_data:
-            raise HTTPException(
-                status_code=404,
-                detail="This document version does not have a preview file.",
-            )
+        pdf_data = record.pdf_data
+        if not pdf_data:
+            preview = fitz.open()
+            for stored_page in sorted(record.pages, key=lambda page: page.page_number):
+                page = preview.new_page()
+                page.insert_textbox(
+                    fitz.Rect(48, 48, 547, 744),
+                    stored_page.content,
+                    fontsize=10,
+                    lineheight=1.35,
+                )
+            pdf_data = preview.tobytes(garbage=4, deflate=True)
+            preview.close()
         return Response(
-            content=record.pdf_data,
+            content=pdf_data,
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f'inline; filename="{record.filename}"',

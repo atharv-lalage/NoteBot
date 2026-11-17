@@ -158,6 +158,11 @@ summaries, flashcard sets, and quizzes are stored with their document version;
 open the Summary or Flashcards tab and select a saved item to restore its
 stored content.
 
+New uploads are previewed from their original PDF bytes. For older versions
+created before PDF byte storage was added, the preview endpoint generates a
+readable PDF from the version's persisted page text, so the PDF panel remains
+usable without silently changing the stored document version.
+
 Logical study materials and uploaded files are stored separately. A logical
 document such as `DBMS Notes` can have multiple immutable rows in
 `document_versions`; pages, chunks, generated assets, and conversations point
