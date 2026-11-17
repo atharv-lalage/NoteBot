@@ -242,6 +242,52 @@ function App() {
     } catch (err) { setError(err.message); }
   }
 
+  async function handleDeleteDocument(document) {
+    if (!window.confirm(`Delete ${document.name || document.filename} and all its versions?`)) return;
+    try {
+      await deleteDocument(document.document_id || document.id);
+      const remaining = documents.filter((item) => item.document_id !== document.document_id);
+      setDocuments(remaining);
+      setVersions((current) => {
+        const next = { ...current };
+        delete next[document.document_id];
+        return next;
+      });
+      setAssets((current) => current.filter((asset) => asset.document_id !== document.document_id));
+      setConversations((current) => current.filter((conversation) => conversation.document_id !== document.document_id));
+      if (selected?.document_id === document.document_id) {
+        setSelectedId(remaining[0]?.id || null);
+        setMessages([]);
+        setConversationId(null);
+        setPinnedVersion(null);
+        window.localStorage.removeItem("notebot.conversationId");
+        setPdfOpen(false);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleDeleteConversation(conversation, event) {
+    event.stopPropagation();
+    if (!window.confirm(`Delete conversation "${conversation.title}"?`)) return;
+    try {
+      await deleteConversation(conversation.id);
+      const remaining = conversations.filter((item) => item.id !== conversation.id);
+      setConversations(remaining);
+      if (conversation.id === conversationId) {
+        const next = remaining[0];
+        setConversationId(next?.id || null);
+        setSelectedId(next?.document_version_id || selectedId);
+        setMessages([]);
+        setPinnedVersion(null);
+        window.localStorage.removeItem("notebot.conversationId");
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleChat(event) {
     event.preventDefault();
     if (!question.trim() || !selected) return;
@@ -312,13 +358,13 @@ function App() {
           <div className="sidebar-heading"><span>YOUR NOTES</span><label className="upload-button"><Upload size={15} /> Upload PDF<input type="file" accept="application/pdf" onChange={handleUpload} hidden /></label></div>
           {uploading && <div className="uploading">Processing document...</div>}
           <div className="document-list">
-            {documents.filter((doc) => doc.is_current !== false).map((doc) => <div key={doc.document_id}><button className={`document-item ${doc.id === selectedId ? "selected" : ""}`} onClick={() => { setSelectedId(doc.id); setMessages([]); setConversationId(null); setPinnedVersion(null); }}><FileText size={17} /><span><b>{doc.name || doc.filename}</b><small>Current · {doc.page_count} pages</small></span></button><div className="version-list">{(versions[doc.document_id] || [doc]).map((version) => <button key={version.id} className={`version-item ${version.id === selectedId ? "selected" : ""}`} onClick={() => { setSelectedId(version.id); setMessages([]); setConversationId(null); setPinnedVersion(null); }}>Version {version.version_number}{version.is_current ? " · Current" : ""}</button>)}</div></div>)}
+            {documents.filter((doc) => doc.is_current !== false).map((doc) => <div key={doc.document_id}><div className="document-row"><button className={`document-item ${doc.id === selectedId ? "selected" : ""}`} onClick={() => { setSelectedId(doc.id); setMessages([]); setConversationId(null); setPinnedVersion(null); }}><FileText size={17} /><span><b>{doc.name || doc.filename}</b><small>Current · {doc.page_count} pages</small></span></button><button className="item-delete-button" onClick={(event) => { event.stopPropagation(); handleDeleteDocument(doc); }} title={`Delete ${doc.name || doc.filename}`} aria-label={`Delete ${doc.name || doc.filename}`}><Trash2 size={14} /></button></div><div className="version-list">{(versions[doc.document_id] || [doc]).map((version) => <button key={version.id} className={`version-item ${version.id === selectedId ? "selected" : ""}`} onClick={() => { setSelectedId(version.id); setMessages([]); setConversationId(null); setPinnedVersion(null); }}>Version {version.version_number}{version.is_current ? " · Current" : ""}</button>)}</div></div>)}
             {!documents.length && <div className="empty-sidebar">Upload a PDF to begin studying.</div>}
           </div>
           <div className="conversation-sidebar">
             <div className="sidebar-section-label">CONVERSATIONS</div>
             {!conversations.length && <div className="empty-sidebar">No saved conversations yet.</div>}
-            {conversations.map((conversation) => <button key={conversation.id} className={`conversation-item ${conversation.id === conversationId ? "selected" : ""}`} onClick={() => setConversationId(conversation.id)}><MessageCircle size={15} /><span><b>{conversation.title}</b><small>Version {conversation.version_number}</small></span></button>)}
+            {conversations.map((conversation) => <div className={`conversation-row ${conversation.id === conversationId ? "selected" : ""}`} key={conversation.id}><button className="conversation-item" onClick={() => setConversationId(conversation.id)}><MessageCircle size={15} /><span><b>{conversation.title}</b><small>Version {conversation.version_number}</small></span></button><button className="item-delete-button" onClick={(event) => handleDeleteConversation(conversation, event)} title={`Delete ${conversation.title}`} aria-label={`Delete ${conversation.title}`}><Trash2 size={14} /></button></div>)}
           </div>
           {selected && <button className="delete-button" onClick={handleDelete}><Trash2 size={15} /> Delete document</button>}
           <div className="sidebar-footer"><BookOpen size={16} /> Answers stay grounded in your notes.</div>
