@@ -1,204 +1,300 @@
-# 📒 NoteBot — AI-Powered RAG Study Assistant
+# NoteBot
 
-An intelligent study assistant that lets you **chat with your PDF notes** using a Retrieval-Augmented Generation (RAG) pipeline powered by **Google Gemini 3.5 Flash Lite**.
+## A personal AI study assistant for PDF notes
 
-Upload any PDF → NoteBot chunks it, embeds it, and lets you ask questions, generate summaries, and create flashcards — all grounded in your actual notes.
+NoteBot is my personal project for exploring grounded generative-AI
+applications. It turns PDF study notes into a persistent, searchable study
+workspace where I can ask questions, read the source PDF, generate summaries,
+create flashcards, and take quizzes.
 
-👉 **[Read the Technical Documentation & FAQ](TECHNICAL_DOCS.md)** for architecture diagrams, RAG step-by-step pipeline specs, and technical design choices.
+The application uses Retrieval-Augmented Generation (RAG): the model receives
+relevant excerpts from the selected document version instead of being asked to
+answer from general knowledge alone. When the notes do not contain enough
+evidence, NoteBot is designed to refuse rather than invent an answer.
 
-👉 **[Read the Week 1 Requirements and Design](docs/requirements-and-design.md)** for the problem statement, scope, requirements, diagrams, schema, and evaluation plan.
+> **Project status:** personal project / learning project. It is not a
+> multi-user production service and should not be used for medical, legal,
+> financial, or other high-stakes decisions.
 
----
+## What NoteBot can do
 
-## ✨ GenAI Features Demonstrated
+- Upload text-based PDF notes and index them page by page.
+- Keep immutable document versions when the same logical document changes.
+- Ask grounded questions with streamed answers and page citations.
+- Continue conversations with history persisted in PostgreSQL.
+- Generate and save document summaries, flashcard sets, and quizzes.
+- Open the exact selected or conversation-pinned PDF beside the study tools.
+- Resize or hide the notes sidebar and PDF panel.
+- Delete one document or one conversation without clearing unrelated data.
+- Restore saved learning assets after restarting the application.
 
-| Feature | Implementation | Why It Matters |
-|---------|---------------|----------------|
-| **RAG Pipeline** | Chunking → Embedding → Cosine Retrieval → Generation | Core pattern behind ChatGPT plugins, Perplexity, etc. |
-| **Streaming Responses** | `generate_content_stream` — token-by-token output | Real-time UX, industry standard for LLM apps |
-| **Structured Output** | `response_mime_type="application/json"` | Reliable, parseable AI responses (no regex hacks) |
-| **Multi-Turn Chat** | `st.session_state` conversation history | Context-aware follow-up questions |
-| **Batch Embeddings** | Single API call per 100 chunks | 10x fewer API calls vs one-at-a-time |
-| **Source Attribution** | Retrieved chunks + similarity scores shown | Transparency & trust in AI answers |
-| **Retry with Backoff** | Auto-retry on 429/503 with exponential delay | Production-grade error resilience |
-| **Prompt Engineering** | System instructions + context injection | Grounded, hallucination-resistant answers |
+Scanned PDFs without selectable text are currently outside the supported
+ingestion path because OCR is not yet included.
 
----
+## How it works
 
-## 🧩 App Tabs
+### 1. Upload and ingestion
 
-### 💬 Chat — RAG Q&A with Streaming
-Ask questions about your notes. Answers are streamed token-by-token and grounded in retrieved chunks with similarity scores.
+The frontend sends a PDF to the FastAPI API. The backend validates the file,
+computes a SHA-256 content hash, extracts text with PyMuPDF, preserves page
+numbers, and splits the text into overlapping chunks using
+`RecursiveCharacterTextSplitter`.
 
-### 📊 Summary — Structured Document Analysis
-One-click AI summary returning structured JSON with: title, summary, key topics, difficulty level, and study tips.
+The original PDF bytes, pages, chunks, and metadata are stored in PostgreSQL.
+Each chunk is embedded with Gemini Embedding 001 and stored in PostgreSQL
+through pgvector.
 
-### 📇 Flashcards — AI-Generated Study Cards
-Auto-generate Q&A flashcards with difficulty tagging (easy/medium/hard) from your notes.
+### 2. Versioned persistence
 
----
+Documents have two levels:
 
-## 🛠️ Tech Stack
+- A logical document, such as `DBMS_Notes.pdf`.
+- One or more immutable document versions containing the exact PDF, pages,
+  chunks, and embeddings.
 
-| Component | Technology |
-|-----------|-----------|
-| **LLM** | Google Gemini 3.5 Flash Lite |
-| **Embeddings** | Gemini Embedding 001 |
-| **Frontend** | React + Vite |
-| **Backend API** | FastAPI |
-| **Retrieval** | PostgreSQL pgvector cosine search |
-| **Text Splitting** | LangChain `RecursiveCharacterTextSplitter` |
-| **PDF Parsing** | PyMuPDF (page-aware extraction) |
-| **Persistence** | PostgreSQL + pgvector + SQLAlchemy |
+Uploading unchanged content reuses the existing version. Uploading changed
+content creates a new version and marks it current without modifying older
+versions. A conversation is pinned to one version, so later uploads cannot
+silently change the meaning of its history.
 
----
+### 3. Grounded chat
 
-## 🚀 Setup & Run
+When a question is submitted:
 
-```bash
-# 1. Clone
-git clone https://github.com/your-username/note-bot.git
-cd note-bot
+1. The backend loads the conversation and its pinned document version.
+2. Previous messages are used for conversational context and query rewriting.
+3. The question is embedded as a retrieval query.
+4. pgvector returns candidate chunks from that exact version.
+5. Lexical matching and neighboring chunks help direct questions and preserve
+   local context.
+6. The answer service sends the selected context to Gemini with grounding
+   instructions.
+7. The response streams to the React client.
+8. The completed message and source snapshot are persisted.
 
-# 2. Virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
+The frontend does not choose the retrieval scope or send the full conversation
+history. Those decisions are owned by the backend.
 
-# 3. Install dependencies
-pip install -r requirements.txt
+### 4. Learning tools
 
-# 4. Configure API key
-cp .env.example .env
-# Edit .env → add your Gemini API key from https://aistudio.google.com/
-# Optional: set CHAT_MODEL=gemini-3.5-flash-lite
+Summary, flashcard, and quiz requests use the same exact document-version
+boundary. The backend supplies page-labelled chunk text from that version to
+Gemini and validates the structured responses before storing them as generated
+assets. Saved items can be reopened later from the sidebar or the relevant tab.
 
-# 5. Run the API
-uvicorn app:app --reload
+## Architecture
 
-# 6. Run the React frontend in another terminal
-cd frontend
-npm install
-npm run dev
+```mermaid
+flowchart LR
+    Browser[React + Vite study workspace]
+    API[FastAPI API]
+    Services[Application services]
+    Ingestion[PDF ingestion]
+    Retrieval[Retriever + pgvector]
+    Generation[Gemini client + answer service]
+    DB[(PostgreSQL + pgvector)]
+    Gemini[(Google Gemini API)]
+
+    Browser -->|REST + streaming| API
+    API --> Services
+    API --> Ingestion
+    Ingestion --> DB
+    Ingestion --> Retrieval
+    Services --> Retrieval
+    Services --> Generation
+    Retrieval --> DB
+    Retrieval --> Gemini
+    Generation --> Gemini
+    API --> DB
 ```
 
-### Persistent local database and full stack
+### Main layers
 
-The application includes PostgreSQL with pgvector through Docker Compose:
+- **Frontend:** `frontend/src/App.jsx` owns workspace state and rendering.
+  `frontend/src/api.js` is the browser API client and
+  `frontend/src/styles.css` defines the study workspace layout.
+- **API:** `app.py` creates the FastAPI application. `app/api.py` exposes
+  upload, version, chat, asset, PDF, and deletion endpoints.
+- **Ingestion:** `app/ingestion/` validates PDFs, extracts page text, chunks
+  content, and prepares documents for persistence.
+- **Retrieval:** `app/retrieval/` creates embeddings and performs
+  version-scoped pgvector and lexical retrieval.
+- **Generation:** `app/generation/` isolates the Gemini client, prompts, and
+  grounded answer generation.
+- **Services:** `app/services/` contains chat, summary, flashcard, and quiz
+  application interfaces.
+- **Persistence:** `app/db_models.py`, `app/repositories.py`, Alembic
+  migrations, and PostgreSQL manage durable state.
+- **Configuration:** `app/config.py` centralizes environment-based settings.
+
+The PDF viewer is intentionally a separate workspace section from Chat,
+Summary, Flashcards, and Quiz. It can remain open while switching among the
+study tools and closes automatically for Quiz. The notes sidebar and PDF
+section have independent open/close and resize controls.
+
+## Tech stack
+
+| Area | Technology |
+|---|---|
+| Frontend | React 18, Vite, Lucide React |
+| Backend | FastAPI, Uvicorn, Pydantic |
+| Language | Python, JavaScript/JSX |
+| LLM | Google Gemini (configurable; `gemini-3.5-flash-lite` by default) |
+| Embeddings | `gemini-embedding-001`, 3072 dimensions by default |
+| PDF processing | PyMuPDF |
+| Chunking | LangChain text splitters |
+| Database | PostgreSQL 16 with pgvector |
+| ORM and migrations | SQLAlchemy, Alembic |
+| Containers | Docker and Docker Compose |
+| Validation | Pytest test suite and frontend Vite production build |
+
+## Project structure
+
+```text
+NoteBot/
+├── app.py                         # FastAPI application entry point
+├── app/
+│   ├── api.py                     # HTTP routes and streaming responses
+│   ├── config.py                  # Centralized settings
+│   ├── database.py                # SQLAlchemy engine and sessions
+│   ├── db_models.py               # PostgreSQL persistence models
+│   ├── models.py                  # Domain models
+│   ├── repositories.py            # Persistence operations
+│   ├── schemas.py                 # Structured API/domain schemas
+│   ├── ingestion/                 # PDF loading, chunking, pipeline
+│   ├── retrieval/                 # Embeddings, pgvector, retrieval
+│   ├── generation/                # Gemini client, prompts, answers
+│   └── services/                  # Chat and learning services
+├── frontend/
+│   └── src/                       # React UI, API client, and styles
+├── alembic/                       # Database migrations
+├── tests/                         # Backend tests
+├── evaluation/                    # Evaluation questions and experiments
+├── docs/                          # Requirements and project design
+├── Dockerfile
+├── docker-compose.yml
+├── TECHNICAL_DOCS.md
+└── requirements.txt
+```
+
+## Run locally
+
+### Prerequisites
+
+- Python 3.9 or newer
+- Node.js and npm
+- Docker Desktop (recommended for PostgreSQL)
+- A Google Gemini API key
+
+### Environment configuration
+
+```bash
+cp .env.example .env
+```
+
+Set `GEMINI_API_KEY` in `.env`. The defaults in `app/config.py` are suitable
+for local development. Useful optional settings include:
+
+```dotenv
+CHAT_MODEL=gemini-3.5-flash-lite
+EMBED_MODEL=gemini-embedding-001
+EMBEDDING_DIMENSIONS=3072
+CHUNK_SIZE=800
+CHUNK_OVERLAP=200
+RETRIEVAL_CANDIDATE_K=16
+RETRIEVAL_TOP_K=6
+RETRIEVAL_SIMILARITY_THRESHOLD=0.35
+RETRIEVAL_NEIGHBOR_WINDOW=1
+MAX_FILE_SIZE_MB=20
+```
+
+### Recommended Docker Compose run
 
 ```bash
 docker compose up --build
 ```
 
-This persists documents, immutable versions, original PDF bytes, pages, chunks,
-embeddings, conversations, messages, generated assets, and source links in the
-`postgres_data` volume. To run migrations manually:
+Then open:
+
+- Frontend: <http://localhost:5173>
+- API health: <http://localhost:8000/api/health>
+
+The PostgreSQL data is stored in the `postgres_data` Docker volume. It
+contains document versions, PDF bytes, pages, chunks, embeddings,
+conversations, messages, citations, and generated assets.
+
+### Run services separately
 
 ```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Start PostgreSQL/pgvector first, then apply migrations.
 docker compose up -d db
 alembic upgrade head
+uvicorn app:app --reload
 ```
 
-Retrieval uses pgvector cosine search with candidate over-retrieval, a
-configurable similarity threshold, document filtering, neighboring chunks, and
-page/chunk citation metadata.
+In another terminal:
 
-Chat answers use versioned grounded prompts, conversation-aware query rewriting,
-strict refusal behavior, and application-generated page citations. Unsupported
-questions return: `I could not find enough information in your uploaded notes to
-answer this question.`
-
----
-
-## 📁 Project Structure
-
-```
-NoteBot/
-├── app.py              # FastAPI entry point
-├── app/
-│   ├── config.py       # Centralized settings
-│   ├── ingestion/      # PDF loading and chunking
-│   ├── retrieval/      # Embeddings, vector store, retrieval
-│   ├── generation/     # Gemini client, prompts, answer generation
-│   ├── services/       # Chat, summary, flashcard, and quiz interfaces
-│   └── api.py           # FastAPI backend endpoints
-├── frontend/             # React + Vite frontend
-├── tests/               # Automated tests
-├── evaluation/          # Evaluation assets
-├── docs/                # Requirements and project design
-├── Dockerfile
-├── docker-compose.yml
-│                        # - Retry logic for API resilience
-├── TECHNICAL_DOCS.md   # Architecture, RAG step-by-step & Technical FAQ
-├── requirements.txt    # Clean dependencies (6 packages)
-├── .env                # Your API key (git-ignored)
-├── .env.example        # API key template
-├── .gitignore          # Ignores .env, venv/, __pycache__/
-└── README.md           # Main project overview
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-PDF uploads are validated for type and size, hashed with SHA-256 for duplicate
-detection, extracted page by page, and tracked through `uploaded → processing →
-ready` or `failed`. Scanned PDFs without selectable text receive a clear upload
-error. Uploads with the same hash return the existing immutable document
-version. Changed content with the same filename creates a new version without
-rewriting the previous version's pages, chunks, or embeddings. New
-conversations are pinned to the latest ready version, while follow-up messages
-continue using the version selected when their conversation was created.
-The frontend clearly labels when a newer version is available for an older
-conversation. Users can keep the conversation pinned to its original version
-or start a separate chat pinned to the latest version; existing conversations
-are never migrated silently.
-Assistant source snapshots retain the document version, page, chunk, and
-similarity score used for each answer.
+## Important API routes
 
-The React workspace includes a **Read PDF** tab that previews the exact
-document version currently selected or pinned to a conversation. Generated
-summaries, flashcard sets, and quizzes are stored with their document version;
-open the Summary or Flashcards tab and select a saved item to restore its
-stored content.
+All routes are prefixed with `/api`.
 
-New uploads are previewed from their original PDF bytes. For older versions
-created before PDF byte storage was added, the preview endpoint generates a
-readable PDF from the version's persisted page text, so the PDF panel remains
-usable without silently changing the stored document version.
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/health` | Service health check |
+| `POST` | `/documents` | Upload and index a PDF |
+| `GET` | `/documents` | List logical document versions |
+| `GET` | `/documents/{id}/versions` | List versions of a document |
+| `GET` | `/document-versions/{id}/file` | Stream the exact PDF version |
+| `DELETE` | `/documents/{id}` | Delete a logical document and related data |
+| `POST` | `/conversations` | Create a version-pinned conversation |
+| `GET` | `/conversations` | List saved conversations |
+| `GET` | `/conversations/{id}` | Restore messages and citations |
+| `DELETE` | `/conversations/{id}` | Delete one conversation |
+| `POST` | `/conversations/{id}/messages` | Stream a grounded chat response |
+| `POST` | `/documents/{id}/chat` | Compatibility chat route for a version-aware request |
+| `POST` | `/documents/{id}/summary` | Generate and save a structured summary |
+| `POST` | `/documents/{id}/flashcards` | Generate and save flashcards |
+| `POST` | `/documents/{id}/quiz` | Generate and save a quiz |
+| `POST` | `/documents/{id}/quiz/score` | Score submitted quiz answers |
+| `GET` | `/documents/{id}/assets` | List saved summaries, cards, and quizzes |
 
-Logical study materials and uploaded files are stored separately. A logical
-document such as `DBMS Notes` can have multiple immutable rows in
-`document_versions`; pages, chunks, generated assets, and conversations point
-to a specific version. Existing data is migrated as Version 1 by
-`0003_split_document_versions`.
+## Testing and validation
 
-Conversations are persisted through:
+Backend tests are under `tests/`. The frontend can be built with:
 
-- `POST /api/conversations`
-- `GET /api/conversations`
-- `GET /api/conversations/{conversation_id}`
-- `DELETE /api/conversations/{conversation_id}`
-
-Each conversation is pinned to one document version. Messages use
-`pending`, `completed`, and `failed` statuses, so interrupted streamed answers
-are not recorded as successful responses.
-
-Chat requests contain only the persisted conversation ID and the new question:
-
-```json
-{
-  "conversation_id": "conversation-uuid",
-  "question": "Explain normalization"
-}
+```bash
+cd frontend
+npm run build
 ```
 
-The backend loads the conversation history, pinned document version, and
-retrieval scope from PostgreSQL. The frontend does not send conversation
-history or document scopes.
+For a complete local stack check:
 
-Retrieval is restricted to the conversation's exact `document_version_id`.
-Chunks from newer versions of the same logical document are never searched by
-an older conversation.
+```bash
+docker compose up --build
+curl http://localhost:8000/api/health
+```
 
----
+## Documentation
 
-## 📄 License
+- [`TECHNICAL_DOCS.md`](TECHNICAL_DOCS.md) — detailed architecture, RAG
+  pipeline, persistence model, API behavior, and design decisions.
+- [`docs/requirements-and-design.md`](docs/requirements-and-design.md) —
+  requirements, scope, use cases, architecture, schema, and evaluation plan.
+- [`NoteBot_Interview_QA.md`](NoteBot_Interview_QA.md) — project discussion
+  and interview preparation notes.
 
-Academic / Demo purposes.
+## License and usage
+
+This is a personal project for learning and experimentation. There is no
+formal production support or warranty. Use your own API key, keep `.env`
+private, and do not commit secrets.
