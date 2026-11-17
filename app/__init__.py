@@ -1,0 +1,1 @@
+"""NoteBot application package."""

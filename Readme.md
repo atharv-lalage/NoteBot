@@ -1,10 +1,12 @@
 # 📒 NoteBot — AI-Powered RAG Study Assistant
 
-An intelligent study assistant that lets you **chat with your PDF notes** using a Retrieval-Augmented Generation (RAG) pipeline powered by **Google Gemini 2.5 Flash**.
+An intelligent study assistant that lets you **chat with your PDF notes** using a Retrieval-Augmented Generation (RAG) pipeline powered by **Google Gemini 3.5 Flash Lite**.
 
 Upload any PDF → NoteBot chunks it, embeds it, and lets you ask questions, generate summaries, and create flashcards — all grounded in your actual notes.
 
 👉 **[Read the Technical Documentation & FAQ](TECHNICAL_DOCS.md)** for architecture diagrams, RAG step-by-step pipeline specs, and technical design choices.
+
+👉 **[Read the Week 1 Requirements and Design](docs/requirements-and-design.md)** for the problem statement, scope, requirements, diagrams, schema, and evaluation plan.
 
 ---
 
@@ -40,12 +42,14 @@ Auto-generate Q&A flashcards with difficulty tagging (easy/medium/hard) from you
 
 | Component | Technology |
 |-----------|-----------|
-| **LLM** | Google Gemini 2.5 Flash |
+| **LLM** | Google Gemini 3.5 Flash Lite |
 | **Embeddings** | Gemini Embedding 001 |
-| **Frontend** | Streamlit |
-| **Retrieval** | Cosine similarity (NumPy) |
+| **Frontend** | React + Vite |
+| **Backend API** | FastAPI |
+| **Retrieval** | PostgreSQL pgvector cosine search |
 | **Text Splitting** | LangChain `RecursiveCharacterTextSplitter` |
-| **PDF Parsing** | PyPDF2 |
+| **PDF Parsing** | PyMuPDF (page-aware extraction) |
+| **Persistence** | PostgreSQL + pgvector + SQLAlchemy |
 
 ---
 
@@ -67,10 +71,41 @@ pip install -r requirements.txt
 # 4. Configure API key
 cp .env.example .env
 # Edit .env → add your Gemini API key from https://aistudio.google.com/
+# Optional: set CHAT_MODEL=gemini-3.5-flash-lite
 
-# 5. Run
-streamlit run app.py
+# 5. Run the API
+uvicorn app:app --reload
+
+# 6. Run the React frontend in another terminal
+cd frontend
+npm install
+npm run dev
 ```
+
+### Persistent local database and full stack
+
+The application includes PostgreSQL with pgvector through Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+This persists documents, pages, chunks, embeddings, conversations, messages,
+and source links in the `postgres_data` volume. To run migrations manually:
+
+```bash
+docker compose up -d db
+alembic upgrade head
+```
+
+Retrieval uses pgvector cosine search with candidate over-retrieval, a
+configurable similarity threshold, document filtering, neighboring chunks, and
+page/chunk citation metadata.
+
+Chat answers use versioned grounded prompts, conversation-aware query rewriting,
+strict refusal behavior, and application-generated page citations. Unsupported
+questions return: `I could not find enough information in your uploaded notes to
+answer this question.`
 
 ---
 
@@ -78,10 +113,20 @@ streamlit run app.py
 
 ```
 NoteBot/
-├── app.py              # Main application (282 lines)
-│                        # - RAG pipeline (embed → retrieve → generate)
-│                        # - Streaming chat with memory
-│                        # - Structured output for summary & flashcards
+├── app.py              # FastAPI entry point
+├── app/
+│   ├── config.py       # Centralized settings
+│   ├── ingestion/      # PDF loading and chunking
+│   ├── retrieval/      # Embeddings, vector store, retrieval
+│   ├── generation/     # Gemini client, prompts, answer generation
+│   ├── services/       # Chat, summary, flashcard, and quiz interfaces
+│   └── api.py           # FastAPI backend endpoints
+├── frontend/             # React + Vite frontend
+├── tests/               # Automated tests
+├── evaluation/          # Evaluation assets
+├── docs/                # Requirements and project design
+├── Dockerfile
+├── docker-compose.yml
 │                        # - Retry logic for API resilience
 ├── TECHNICAL_DOCS.md   # Architecture, RAG step-by-step & Technical FAQ
 ├── requirements.txt    # Clean dependencies (6 packages)
@@ -90,6 +135,11 @@ NoteBot/
 ├── .gitignore          # Ignores .env, venv/, __pycache__/
 └── README.md           # Main project overview
 ```
+
+PDF uploads are validated for type and size, hashed with SHA-256 for duplicate
+detection, extracted page by page, and tracked through `uploaded → processing →
+ready` or `failed`. Scanned PDFs without selectable text receive a clear upload
+error.
 
 ---
 

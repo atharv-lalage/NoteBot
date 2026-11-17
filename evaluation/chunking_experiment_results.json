@@ -1,0 +1,164 @@
+[
+  {
+    "strategy": "recursive",
+    "chunk_size": 400,
+    "overlap": 50,
+    "chunk_count": 2,
+    "average_characters": 271,
+    "min_characters": 153,
+    "max_characters": 389
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 400,
+    "overlap": 100,
+    "chunk_count": 2,
+    "average_characters": 271,
+    "min_characters": 153,
+    "max_characters": 389
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 400,
+    "overlap": 200,
+    "chunk_count": 2,
+    "average_characters": 271,
+    "min_characters": 153,
+    "max_characters": 389
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 800,
+    "overlap": 50,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 800,
+    "overlap": 100,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 800,
+    "overlap": 200,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 1200,
+    "overlap": 50,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 1200,
+    "overlap": 100,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "recursive",
+    "chunk_size": 1200,
+    "overlap": 200,
+    "chunk_count": 1,
+    "average_characters": 544,
+    "min_characters": 544,
+    "max_characters": 544
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 400,
+    "overlap": 50,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 400,
+    "overlap": 100,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 400,
+    "overlap": 200,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 800,
+    "overlap": 50,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 800,
+    "overlap": 100,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 800,
+    "overlap": 200,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 1200,
+    "overlap": 50,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 1200,
+    "overlap": 100,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  },
+  {
+    "strategy": "heading",
+    "chunk_size": 1200,
+    "overlap": 200,
+    "chunk_count": 3,
+    "average_characters": 180,
+    "min_characters": 153,
+    "max_characters": 214
+  }
+]

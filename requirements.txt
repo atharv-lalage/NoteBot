@@ -1,6 +1,12 @@
-streamlit>=1.35.0
-google-genai>=1.50.0
-langchain-text-splitters>=1.0.0
-PyPDF2>=3.0.0
+google-genai>=1.47.0
+langchain-text-splitters>=0.3.11
+PyMuPDF>=1.24.0
 numpy>=2.0.0
 python-dotenv>=1.0.0
+SQLAlchemy>=2.0.0
+psycopg[binary]>=3.2.0
+pgvector>=0.3.0
+alembic>=1.13.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9

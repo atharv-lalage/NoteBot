@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "description": "Initial NoteBot evaluation questions. Replace document_id with a fixture document before automated scoring.",
+  "questions": [
+    {
+      "id": "direct-fact-001",
+      "type": "direct_retrieval",
+      "question": "What is the main topic introduced in the notes?",
+      "expected_behavior": "Answer directly from one or more retrieved passages and cite supporting context."
+    },
+    {
+      "id": "direct-fact-002",
+      "type": "direct_retrieval",
+      "question": "Which definition is given for the central concept?",
+      "expected_behavior": "Return the definition from the document without adding unsupported details."
+    },
+    {
+      "id": "synthesis-001",
+      "type": "multi_passage_synthesis",
+      "question": "How are the two main concepts related according to the notes?",
+      "expected_behavior": "Combine relevant passages and explain the relationship accurately."
+    },
+    {
+      "id": "comparison-001",
+      "type": "comparison",
+      "question": "Compare the advantages and limitations of the two approaches described.",
+      "expected_behavior": "Present a balanced comparison grounded in the document."
+    },
+    {
+      "id": "abstention-001",
+      "type": "unsupported_question",
+      "question": "What is the author's favorite programming language?",
+      "expected_behavior": "Use the configured not-found response instead of guessing."
+    },
+    {
+      "id": "follow-up-001",
+      "type": "multi_turn",
+      "question": "Can you explain that in simpler terms?",
+      "expected_behavior": "Use the immediately preceding answer and document context to clarify the same topic."
+    },
+    {
+      "id": "summary-001",
+      "type": "structured_summary",
+      "question": "Generate a summary with key topics, difficulty, and study tips.",
+      "expected_behavior": "Return all required summary fields with valid structured output."
+    },
+    {
+      "id": "flashcards-001",
+      "type": "structured_flashcards",
+      "question": "Generate five flashcards from the notes.",
+      "expected_behavior": "Return five cards, each with a question, answer, and valid difficulty."
+    }
+  ]
+}

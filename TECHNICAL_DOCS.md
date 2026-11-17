@@ -19,7 +19,7 @@
 2. **Summary** — Auto-analyze the document structure and difficulty
 3. **Flashcards** — Generate study cards with difficulty tagging
 
-The app is built with **Streamlit** (frontend) and **Google Gemini 2.5 Flash** (LLM + Embeddings).
+The app uses a **React/Vite frontend**, a **FastAPI backend**, and **Google Gemini 3.5 Flash Lite** for generation.
 
 ---
 
@@ -43,10 +43,10 @@ The app is built with **Streamlit** (frontend) and **Google Gemini 2.5 Flash** (
 ┌─────────────────────────────────────────────────────────────┐
 │                     RAG PIPELINE                             │
 │                                                              │
-│  1. PDF Text Extraction (PyPDF2)                             │
+│  1. PDF Text Extraction (PyMuPDF, page-aware)                │
 │  2. Chunking (RecursiveCharacterTextSplitter)                │
 │  3. Embedding (Gemini Embedding 001)                         │
-│  4. Storage (NumPy arrays in session state)                  │
+│  4. Storage (PostgreSQL + pgvector)                          │
 │  5. Retrieval (Cosine similarity, top-4)                     │
 │  6. Generation (Gemini 2.5 Flash with context)               │
 │                                                              │
@@ -69,9 +69,12 @@ RAG (Retrieval-Augmented Generation) is the technique behind tools like ChatGPT 
 
 ### Step 1: Document Ingestion
 ```
-PDF File → PyPDF2 → Raw Text String
+PDF File → PyMuPDF → Page-aware text objects
 ```
-We extract all text from every page of the uploaded PDF using `PyPDF2.PdfReader`.
+We extract text from each page using PyMuPDF and retain its 1-based page number.
+The loader validates the PDF signature, enforces the configured file-size limit,
+computes a SHA-256 hash for duplicate detection, and rejects PDFs with no
+selectable text as likely scanned documents.
 
 ### Step 2: Chunking
 ```
@@ -125,7 +128,7 @@ Instead of waiting for the full response, we stream tokens using `generate_conte
 
 | Line Range | Section | What It Does |
 |-----------|---------|-------------|
-| 1–11 | **Imports** | Core libraries: Streamlit, Gemini SDK, NumPy, PyPDF2, LangChain |
+| 1–11 | **Imports** | Core libraries: FastAPI, Gemini SDK, NumPy, PyMuPDF, LangChain |
 | 13–29 | **Config & Init** | Loads API key, initializes Gemini client, sets up page |
 | 31–39 | **Session State** | Initializes `messages`, `chunks`, `embeddings`, `ready` flags |
 | 41–54 | **Retry Helper** | `safe_api_call()` — retries API calls 3 times with backoff on 429/503 |
@@ -141,7 +144,7 @@ Instead of waiting for the full response, we stream tokens using `generate_conte
 | Decision | Why |
 |----------|-----|
 | **NumPy for vector store** (not ChromaDB/FAISS) | Shows understanding of how similarity search actually works under the hood |
-| **Session state for storage** | No external database needed, keeps it simple for a study tool |
+| **PostgreSQL + pgvector** | Documents, chunks, embeddings, and conversations survive application restarts |
 | **Batch embedding** | Shows API optimization knowledge (100 chunks per call vs 1) |
 | **Separate task types** | `RETRIEVAL_DOCUMENT` for chunks, `RETRIEVAL_QUERY` for queries — Gemini optimizes embeddings differently |
 | **200-char overlap** | Prevents information loss at chunk boundaries |
@@ -183,7 +186,7 @@ The `safe_api_call` function catches 429 (rate limit) and 503 (server busy) erro
 **Answer:** RAG stands for Retrieval-Augmented Generation. Instead of asking an LLM to answer from its training data (which may be outdated or hallucinate), I retrieve relevant chunks from the user's uploaded PDF and inject them into the prompt as context. This grounds the response in actual data. I used it because NoteBot needs to answer questions about *specific* user-uploaded notes, not general knowledge.
 
 ### Q2: How does the embedding process work in your project?
-**Answer:** I use Google's `gemini-embedding-001` model to convert each text chunk into a 768-dimensional vector. These vectors capture semantic meaning — so similar concepts get similar vectors even if they use different words. I batch-embed up to 100 chunks per API call for efficiency, and store the resulting vectors as a NumPy array in Streamlit's session state.
+**Answer:** I use Google's `gemini-embedding-001` model to convert each text chunk into a vector. These vectors capture semantic meaning — so similar concepts get similar vectors even if they use different words. I batch-embed up to 100 chunks per API call for efficiency, store embeddings in PostgreSQL with pgvector, and load them into the retrieval adapter for queries.
 
 ### Q3: Why did you choose cosine similarity over other distance metrics?
 **Answer:** Cosine similarity measures the angle between two vectors, not their magnitude. This is important because embedding vectors can have varying lengths depending on the text. Cosine similarity normalizes for this, giving a score between -1 and 1 where 1 means identical direction. It's the industry standard for text embeddings and is computationally efficient with NumPy's dot product.
@@ -192,7 +195,7 @@ The `safe_api_call` function catches 429 (rate limit) and 503 (server busy) erro
 **Answer:** Structured output forces the LLM to return valid JSON by setting `response_mime_type="application/json"` in the API config. I used it in two places: the Summary tab (returns title, topics, difficulty, tips as JSON) and the Flashcards tab (returns an array of Q&A objects). This is much more reliable than generating free text and trying to parse it with regex.
 
 ### Q5: How does streaming work in your chat feature?
-**Answer:** Instead of calling `generate_content()` which waits for the full response, I use `generate_content_stream()` which returns an iterator of response chunks. I loop through these chunks, appending each token to a Streamlit placeholder, creating a real-time typing effect. This reduces perceived latency from seconds to milliseconds for the first token.
+**Answer:** Instead of calling `generate_content()` which waits for the full response, the FastAPI chat endpoint uses `generate_content_stream()` and returns a streamed response. The React client reads the response body incrementally to create a real-time typing effect.
 
 ### Q6: What is chunking and why is overlap important?
 **Answer:** Chunking splits a large document into smaller pieces (800 characters in my case) so each piece fits within the LLM's context window. Overlap (200 characters) is critical because without it, a sentence at the boundary of two chunks would be split in half, losing its meaning. The 200-char overlap ensures continuity. I use LangChain's `RecursiveCharacterTextSplitter` which tries to split at natural boundaries like paragraph breaks first.
@@ -207,7 +210,7 @@ The `safe_api_call` function catches 429 (rate limit) and 503 (server busy) erro
 **Answer:** Gemini's embedding API optimizes vectors differently based on the task type. `RETRIEVAL_DOCUMENT` is used when embedding the document chunks — it optimizes for being *found*. `RETRIEVAL_QUERY` is used when embedding the user's question — it optimizes for *finding*. Using the correct task types improves retrieval accuracy compared to using the same type for both.
 
 ### Q10: How do you maintain conversation context across multiple questions?
-**Answer:** I use Streamlit's `st.session_state.messages` to store the full conversation history (role, content, sources, scores). When building the prompt for a new question, I include the last 6 messages (3 user-assistant pairs) as conversation history. This allows the model to understand follow-up questions like "explain that in more detail" or "what about the second point?"
+**Answer:** The React client keeps the active conversation in component state and sends recent messages to the FastAPI endpoint. The API includes that history in the Gemini prompt, allowing follow-up questions such as "explain that in more detail."
 
 ### Q11: What would you improve if you had more time?
 **Answer:** Three things:
@@ -224,9 +227,10 @@ The `safe_api_call` function catches 429 (rate limit) and 503 (server busy) erro
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| `streamlit` | ≥1.35.0 | Web UI framework |
+| `fastapi` | ≥0.115.0 | Backend API |
+| `react` | 18.x | Web UI framework |
 | `google-genai` | ≥1.50.0 | Gemini LLM & Embedding API |
 | `langchain-text-splitters` | ≥1.0.0 | Document chunking |
-| `PyPDF2` | ≥3.0.0 | PDF text extraction |
+| `PyMuPDF` | ≥1.24.0 | Page-aware PDF text extraction and validation |
 | `numpy` | ≥2.0.0 | Vector math & cosine similarity |
 | `python-dotenv` | ≥1.0.0 | Environment variable loading |
