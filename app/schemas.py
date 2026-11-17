@@ -13,7 +13,9 @@ class SearchResult:
     chunk_id: str = ""
     page_number: int = 0
     document_id: str = ""
+    document_version_id: str = ""
     document_name: str = ""
+    version_number: int = 0
     citation: str = ""
 
 

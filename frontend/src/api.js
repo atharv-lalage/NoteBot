@@ -5,13 +5,28 @@ async function request(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, options);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || "Request failed");
+    const detail = Array.isArray(body.detail)
+      ? body.detail.map((item) => `${item.loc?.join(".") || "request"}: ${item.msg}`).join("; ")
+      : body.detail;
+    throw new Error(detail || "Request failed");
   }
   return response;
 }
 
 export async function listDocuments() {
   return (await request("/documents")).json();
+}
+
+export async function listVersions(documentId) {
+  return (await request(`/documents/${documentId}/versions`)).json();
+}
+
+export async function listAssets(documentId) {
+  return (await request(`/documents/${documentId}/assets`)).json();
+}
+
+export function documentFileUrl(versionId) {
+  return `${API_URL}/document-versions/${encodeURIComponent(versionId)}/file`;
 }
 
 export async function uploadDocument(file) {
@@ -24,14 +39,42 @@ export async function deleteDocument(id) {
   await request(`/documents/${id}`, { method: "DELETE" });
 }
 
-export async function chat(id, question, history, onToken) {
+export async function createConversation(documentVersionId, title = "New conversation") {
+  return (
+    await request("/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_version_id: documentVersionId,
+        title,
+      }),
+    })
+  ).json();
+}
+
+export async function listConversations(documentVersionId = null) {
+  const query = documentVersionId
+    ? `?document_version_id=${encodeURIComponent(documentVersionId)}`
+    : "";
+  return (await request(`/conversations${query}`)).json();
+}
+
+export async function getConversation(conversationId) {
+  return (await request(`/conversations/${conversationId}`)).json();
+}
+
+export async function deleteConversation(conversationId) {
+  await request(`/conversations/${conversationId}`, { method: "DELETE" });
+}
+
+export async function sendMessage(conversationId, question, onToken) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await request(`/documents/${id}/chat`, {
+    const response = await request(`/conversations/${conversationId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ conversation_id: conversationId, question }),
       signal: controller.signal,
     });
     const reader = response.body.getReader();
@@ -44,11 +87,13 @@ export async function chat(id, question, history, onToken) {
       answer += token;
       onToken(answer);
     }
+
     return {
       answer,
       citations: answer.trim() === REFUSAL_MESSAGE
         ? []
         : JSON.parse(response.headers.get("X-Citations") || "[]"),
+      conversationId: response.headers.get("X-Conversation-Id"),
     };
   } catch (error) {
     if (error.name === "AbortError") {
@@ -59,6 +104,8 @@ export async function chat(id, question, history, onToken) {
     window.clearTimeout(timeout);
   }
 }
+
+export const chat = sendMessage;
 
 export async function generateSummary(id) {
   return (await request(`/documents/${id}/summary`, { method: "POST" })).json();

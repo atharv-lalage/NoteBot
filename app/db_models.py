@@ -5,7 +5,7 @@ from typing import List, Optional
 from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,25 +28,45 @@ class DocumentRecord(Base):
 
     id: Mapped[object] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[Optional[object]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    # Kept for compatibility with records and clients created before versioning.
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    user: Mapped[Optional[UserRecord]] = relationship(back_populates="documents")
+    versions: Mapped[List["DocumentVersionRecord"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class DocumentVersionRecord(Base):
+    __tablename__ = "document_versions"
+
+    id: Mapped[object] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[object] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    pdf_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error: Mapped[Optional[str]] = mapped_column(Text)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    user: Mapped[Optional[UserRecord]] = relationship(back_populates="documents")
+    document: Mapped[DocumentRecord] = relationship(back_populates="versions")
     pages: Mapped[List["DocumentPageRecord"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="version", cascade="all, delete-orphan"
     )
     chunks: Mapped[List["ChunkRecord"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="version", cascade="all, delete-orphan"
     )
     conversations: Mapped[List["ConversationRecord"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="version", cascade="all, delete-orphan"
     )
     generated_assets: Mapped[List["GeneratedAssetRecord"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="version", cascade="all, delete-orphan"
     )
 
 
@@ -55,11 +75,14 @@ class DocumentPageRecord(Base):
 
     id: Mapped[object] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     document_id: Mapped[object] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    document_version_id: Mapped[object] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
     )
     page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    document: Mapped[DocumentRecord] = relationship(back_populates="pages")
+    version: Mapped[DocumentVersionRecord] = relationship(back_populates="pages")
 
 
 class ChunkRecord(Base):
@@ -67,7 +90,10 @@ class ChunkRecord(Base):
 
     id: Mapped[str] = mapped_column(String(256), primary_key=True)
     document_id: Mapped[object] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    document_version_id: Mapped[object] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
     )
     page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -76,7 +102,7 @@ class ChunkRecord(Base):
     embedding: Mapped[Optional[List[float]]] = mapped_column(
         Vector(settings.embedding_dimensions)
     )
-    document: Mapped[DocumentRecord] = relationship(back_populates="chunks")
+    version: Mapped[DocumentVersionRecord] = relationship(back_populates="chunks")
     message_sources: Mapped[List["MessageSourceRecord"]] = relationship(
         back_populates="chunk", cascade="all, delete-orphan"
     )
@@ -88,11 +114,15 @@ class ConversationRecord(Base):
     id: Mapped[object] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[Optional[object]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     document_id: Mapped[object] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
     )
+    document_version_id: Mapped[object] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="New conversation")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     user: Mapped[Optional[UserRecord]] = relationship(back_populates="conversations")
-    document: Mapped[DocumentRecord] = relationship(back_populates="conversations")
+    version: Mapped[DocumentVersionRecord] = relationship(back_populates="conversations")
     messages: Mapped[List["MessageRecord"]] = relationship(
         back_populates="conversation", cascade="all, delete-orphan"
     )
@@ -107,7 +137,9 @@ class MessageRecord(Base):
     )
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     conversation: Mapped[ConversationRecord] = relationship(back_populates="messages")
     sources: Mapped[List["MessageSourceRecord"]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
@@ -124,6 +156,14 @@ class MessageSourceRecord(Base):
     chunk_id: Mapped[str] = mapped_column(
         ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False
     )
+    document_id: Mapped[object] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    document_version_id: Mapped[object] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[float] = mapped_column(nullable=False)
     message: Mapped[MessageRecord] = relationship(back_populates="sources")
     chunk: Mapped[ChunkRecord] = relationship(back_populates="message_sources")
@@ -136,7 +176,10 @@ class GeneratedAssetRecord(Base):
     document_id: Mapped[object] = mapped_column(
         ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
+    document_version_id: Mapped[object] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False
+    )
     asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    document: Mapped[DocumentRecord] = relationship(back_populates="generated_assets")
+    version: Mapped[DocumentVersionRecord] = relationship(back_populates="generated_assets")

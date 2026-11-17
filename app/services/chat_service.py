@@ -12,11 +12,14 @@ class ChatService:
         self.retriever = retriever
         self.answer_service = answer_service
 
-    def answer(self, question: str, history: str = "", k: int = 4) -> ChatResponse:
-        return self.answer_service.answer(question, self.retriever.retrieve(question, k), history)
+    def answer(
+        self, question: str, *, version_id: str, history: str = "", k: int = 4
+    ) -> ChatResponse:
+        sources = self.retriever.retrieve(question, version_id=version_id, k=k)
+        return self.answer_service.answer(question, sources, history)
 
     def stream_answer(
-        self, question: str, history: str = "", k: int = 4
+        self, question: str, *, version_id: str, history: str = "", k: int = 4
     ) -> tuple[list[SearchResult], Iterator[str]]:
-        sources = self.retriever.retrieve(question, k)
+        sources = self.retriever.retrieve(question, version_id=version_id, k=k)
         return sources, self.answer_service.stream_answer(question, sources, history)

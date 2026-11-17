@@ -2,27 +2,37 @@
 
 from collections.abc import Sequence
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db_models import ChunkRecord, DocumentRecord
+from app.db_models import ChunkRecord, DocumentVersionRecord
 from app.schemas import SearchResult
 
 
 def _result(record: ChunkRecord, score: float) -> SearchResult:
-    document_id = str(record.document_id)
-    document = getattr(record, "document", None)
-    document_name = document.filename if document else document_id
+    document_id = str(getattr(record, "document_id", ""))
+    document_version_id = str(getattr(record, "document_version_id", document_id))
+    version = getattr(record, "version", None)
+    document_name = version.document.name if version and version.document else document_id
+    version_number = version.version_number if version else 0
+    citation = (
+        f"{document_name}, Version {version_number}, Page {record.page_number}"
+        if version_number
+        else f"{document_name}, page {record.page_number}"
+    )
     return SearchResult(
         text=record.content,
         score=score,
         chunk_id=record.id,
         page_number=record.page_number,
         document_id=document_id,
+        document_version_id=document_version_id,
         document_name=document_name,
-        citation=f"{document_name}, page {record.page_number}",
+        version_number=version_number,
+        citation=citation,
     )
 
 
@@ -54,21 +64,26 @@ class PgVectorStore:
         self,
         query_embedding: Sequence[float],
         *,
-        document_ids: Optional[Sequence[str]] = None,
+        version_id: str,
         top_k: Optional[int] = None,
+        query_text: Optional[str] = None,
     ) -> list[SearchResult]:
         """Return thresholded, citation-ready results from filtered candidates."""
         distance = ChunkRecord.embedding.cosine_distance(list(query_embedding))
         filters = [
             ChunkRecord.embedding.is_not(None),
-            DocumentRecord.status == "ready",
+            DocumentVersionRecord.status == "ready",
         ]
-        if document_ids:
-            filters.append(ChunkRecord.document_id.in_(list(document_ids)))
+        filters.append(
+            ChunkRecord.document_version_id == UUID(str(version_id))
+        )
 
         candidate_rows = self.session.execute(
             select(ChunkRecord, (1 - distance).label("similarity"))
-            .join(DocumentRecord, DocumentRecord.id == ChunkRecord.document_id)
+            .join(
+                DocumentVersionRecord,
+                DocumentVersionRecord.id == ChunkRecord.document_version_id,
+            )
             .where(and_(*filters))
             .order_by(distance)
             .limit(self.candidate_k)
@@ -85,12 +100,43 @@ class PgVectorStore:
         selected: dict[str, tuple[ChunkRecord, float]] = {
             record.id: (record, score) for record, score in candidates
         }
+        lexical_terms = {
+            term.strip("?!.,:;()[]{}\"'").lower()
+            for term in (query_text or "").split()
+            if len(term.strip("?!.,:;()[]{}\"'")) >= 4
+        }
+        lexical_terms.difference_update(
+            {"what", "which", "where", "when", "that", "this", "from", "with", "does"}
+        )
+        if lexical_terms:
+            lexical_matches = self.session.scalars(
+                select(ChunkRecord)
+                .where(
+                    and_(
+                        ChunkRecord.document_version_id == UUID(str(version_id)),
+                        ChunkRecord.embedding.is_not(None),
+                        or_(
+                            *[
+                                ChunkRecord.content.ilike(f"%{term}%")
+                                for term in lexical_terms
+                            ]
+                        ),
+                    )
+                )
+            ).all()
+            lexical_score = max(score for _, score in candidates) + 0.001
+            selected.update(
+                {
+                    record.id: (record, lexical_score)
+                    for record in lexical_matches
+                }
+            )
         if self.neighbor_window:
             neighbor_conditions = []
             for record, score in candidates:
                 neighbor_conditions.append(
                     and_(
-                        ChunkRecord.document_id == record.document_id,
+                        ChunkRecord.document_version_id == record.document_version_id,
                         ChunkRecord.page_number == record.page_number,
                         ChunkRecord.chunk_index >= record.chunk_index - self.neighbor_window,
                         ChunkRecord.chunk_index <= record.chunk_index + self.neighbor_window,
@@ -106,12 +152,9 @@ class PgVectorStore:
                 )
             ).all()
             candidate_scores = {record.id: score for record, score in candidates}
-            selected.update(
-                {
-                    record.id: (record, candidate_scores.get(record.id, 0.0))
-                    for record in neighbors
-                }
-            )
+            for record in neighbors:
+                if record.id not in selected:
+                    selected[record.id] = (record, candidate_scores.get(record.id, 0.0))
 
         ranked = sorted(selected.values(), key=lambda item: item[1], reverse=True)
         limit = top_k if top_k is not None else self.top_k

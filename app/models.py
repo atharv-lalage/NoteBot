@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+from uuid import UUID
 
 
 class DocumentStatus(str, Enum):
@@ -38,10 +39,14 @@ class Document:
     document_hash: str
     filename: str
     size_bytes: int
+    pdf_data: Optional[bytes] = None
     status: DocumentStatus = DocumentStatus.UPLOADED
     pages: Optional[list[DocumentPage]] = None
     chunks: Optional[list[DocumentChunk]] = None
     error: Optional[str] = None
+    version_number: int = 1
+    version_group_id: Optional[UUID] = None
+    is_current: bool = True
 
     @property
     def text(self) -> str:

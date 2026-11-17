@@ -221,8 +221,11 @@ uploaded → processing → ready
 The ingestion pipeline validates the PDF signature and size before opening it,
 computes a SHA-256 content hash, extracts text page by page with PyMuPDF, and
 retains 1-based page numbers. A document with no selectable text is reported as
-a likely scanned PDF rather than being indexed as empty content. The in-memory
-document registry rejects duplicate content hashes for the active session.
+a likely scanned PDF rather than being indexed as empty content. The persistent
+document registry rejects duplicate content hashes globally. Each logical
+filename is versioned: unchanged bytes return the existing immutable version,
+while changed bytes create a new version. A failed processing attempt does not
+replace the last ready version.
 
 ## 11. Metadata-rich chunks and chunking experiments
 
@@ -275,10 +278,16 @@ schema is managed by Alembic and includes:
 
 Generated summaries and flashcards are also retained in `generated_assets`.
 Documents, pages, chunks, and embeddings are saved in one repository operation
-after successful indexing. On application startup, the latest ready document is
-loaded from PostgreSQL so it remains available after a restart. Deleting a
-document cascades to its pages, chunks, conversations, source links, and
-generated assets.
+after successful indexing. Document versions are append-only: old pages,
+chunks, and embeddings are never overwritten. On application startup, the
+latest ready document is loaded from PostgreSQL so it remains available after a
+restart. New conversations pin the current version, and existing conversations
+continue to retrieve from their pinned version. Each assistant message stores source snapshots containing the document, version,
+page, chunk, and similarity score. Generated summaries, flashcard sets, and
+quizzes also reference the exact `document_version_id`; assets from older
+versions remain available after a new upload and are labeled with their source
+version. Deleting a document cascades to its pages, chunks, conversations,
+source links, and generated assets.
 
 ## 13. Production retrieval pipeline
 
@@ -288,7 +297,7 @@ Chat retrieval now follows this sequence:
 Question
   → Gemini query embedding
   → pgvector cosine-distance search
-  → ready-document and document-ID filtering
+  → ready-document and exact document-version filtering
   → candidate over-retrieval (default 16)
   → minimum similarity threshold (default 0.35)
   → neighboring chunks on the same page
@@ -298,9 +307,11 @@ Question
 
 The persistent retriever is implemented in
 [`app/retrieval/pgvector_store.py`](../app/retrieval/pgvector_store.py). It
-returns chunk IDs, document IDs, page numbers, similarity scores, and formatted
-citation strings. Chat requests can optionally provide `document_ids` to search
-a selected document collection; otherwise the active document is used.
+returns chunk IDs, logical document IDs, exact document-version IDs, document
+names, version numbers, page numbers, similarity scores, and formatted
+version-aware citation strings. Chat retrieval receives one pinned `version_id` and searches
+only chunks belonging to that exact document version; logical-document IDs are
+never used as a retrieval scope.
 
 Retrieval tuning is centralized through environment variables:
 
@@ -329,20 +340,18 @@ If retrieval returns no threshold-qualified evidence, the service returns:
 I could not find enough information in your uploaded notes to answer this question.
 ```
 
-For supported answers, the API appends trusted citations generated from
+For supported answers, the API returns trusted citation metadata generated from
 retrieved chunk metadata:
 
 ```text
-The answer is ...
-
-Sources:
-- Operating Systems, page 12
-- Operating Systems, page 13
+Source: Operating Systems
+Version: 2
+Page: 12
 ```
 
-Generated content is validated for non-empty output and refusal compliance
-before citations are appended. The frontend displays the same citation metadata
-alongside the streamed answer.
+Generated content is validated for non-empty output and refusal compliance.
+The frontend keeps citations outside the answer text in a collapsible source
+section, showing the document name, exact version, and page for each source.
 
 ## 15. Learning features
 

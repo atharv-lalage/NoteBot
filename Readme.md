@@ -90,8 +90,9 @@ The application includes PostgreSQL with pgvector through Docker Compose:
 docker compose up --build
 ```
 
-This persists documents, pages, chunks, embeddings, conversations, messages,
-and source links in the `postgres_data` volume. To run migrations manually:
+This persists documents, immutable versions, original PDF bytes, pages, chunks,
+embeddings, conversations, messages, generated assets, and source links in the
+`postgres_data` volume. To run migrations manually:
 
 ```bash
 docker compose up -d db
@@ -139,7 +140,57 @@ NoteBot/
 PDF uploads are validated for type and size, hashed with SHA-256 for duplicate
 detection, extracted page by page, and tracked through `uploaded → processing →
 ready` or `failed`. Scanned PDFs without selectable text receive a clear upload
-error.
+error. Uploads with the same hash return the existing immutable document
+version. Changed content with the same filename creates a new version without
+rewriting the previous version's pages, chunks, or embeddings. New
+conversations are pinned to the latest ready version, while follow-up messages
+continue using the version selected when their conversation was created.
+The frontend clearly labels when a newer version is available for an older
+conversation. Users can keep the conversation pinned to its original version
+or start a separate chat pinned to the latest version; existing conversations
+are never migrated silently.
+Assistant source snapshots retain the document version, page, chunk, and
+similarity score used for each answer.
+
+The React workspace includes a **Read PDF** tab that previews the exact
+document version currently selected or pinned to a conversation. Generated
+summaries, flashcard sets, and quizzes are stored with their document version;
+open the Summary or Flashcards tab and select a saved item to restore its
+stored content.
+
+Logical study materials and uploaded files are stored separately. A logical
+document such as `DBMS Notes` can have multiple immutable rows in
+`document_versions`; pages, chunks, generated assets, and conversations point
+to a specific version. Existing data is migrated as Version 1 by
+`0003_split_document_versions`.
+
+Conversations are persisted through:
+
+- `POST /api/conversations`
+- `GET /api/conversations`
+- `GET /api/conversations/{conversation_id}`
+- `DELETE /api/conversations/{conversation_id}`
+
+Each conversation is pinned to one document version. Messages use
+`pending`, `completed`, and `failed` statuses, so interrupted streamed answers
+are not recorded as successful responses.
+
+Chat requests contain only the persisted conversation ID and the new question:
+
+```json
+{
+  "conversation_id": "conversation-uuid",
+  "question": "Explain normalization"
+}
+```
+
+The backend loads the conversation history, pinned document version, and
+retrieval scope from PostgreSQL. The frontend does not send conversation
+history or document scopes.
+
+Retrieval is restricted to the conversation's exact `document_version_id`.
+Chunks from newer versions of the same logical document are never searched by
+an older conversation.
 
 ---
 
